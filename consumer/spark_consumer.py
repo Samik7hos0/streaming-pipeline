@@ -23,12 +23,12 @@ SF_WAREHOUSE = os.getenv('SNOWFLAKE_WAREHOUSE')
 SF_ROLE = os.getenv('SNOWFLAKE_ROLE')
 
 # Kafka config
-KAFKA_BROKER = 'localhost:9092'
+KAFKA_BROKER = os.getenv('KAFKA_BROKER', 'localhost:9092')
 TOPIC = 'stock-prices'
 
 # Paths
 S3_OUTPUT = f's3a://{S3_BUCKET}/streaming/stock_prices'
-LOCAL_CHECKPOINT = 'C:/tmp/spark-checkpoints/stock-stream'
+LOCAL_CHECKPOINT = os.getenv('SPARK_CHECKPOINT', 'C:/tmp/spark-checkpoints/stock-stream')
 
 # Snowflake connection options
 SNOWFLAKE_OPTIONS = {

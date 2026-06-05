@@ -24,3 +24,33 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
       KAFKA_MESSAGE_MAX_BYTES: 1000000
+
+  producer:
+    build:
+      context: .
+      dockerfile: Dockerfile.producer
+    container_name: stock-producer
+    depends_on:
+      - kafka
+    env_file:
+      - .env
+    environment:
+      KAFKA_BROKER: kafka:9092
+    restart: unless-stopped
+
+  spark-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile.consumer
+    container_name: spark-consumer
+    depends_on:
+      - kafka
+    env_file:
+      - .env
+    environment:
+      KAFKA_BROKER: kafka:9092
+      HADOOP_HOME: /opt/hadoop
+      SPARK_CHECKPOINT: /tmp/spark-checkpoints/stock-stream
+    volumes:
+      - ./checkpoints:/tmp/spark-checkpoints
+    restart: unless-stopped
