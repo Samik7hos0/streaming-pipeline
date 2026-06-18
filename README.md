@@ -4,7 +4,7 @@ A production-grade real-time streaming pipeline ingesting live BSE stock data th
 
 ## What This Pipeline Does
 
-Every 60 seconds a Python producer fetches live closing prices for four large-cap BSE stocks and publishes them to Kafka — keyed by symbol so each stock always lands in its own partition. Spark Structured Streaming consumes these messages in 30-second micro-batches and writes to two sinks in the same processing step: raw JSON files land in AWS S3 as an immutable data lake, and structured records land in Snowflake's `STREAMING.STOCK_TICKS` table for real-time querying. The entire pipeline starts with one command.
+Every 60 seconds a Python producer fetches live closing prices for five large-cap BSE stocks and publishes them to Kafka — keyed by symbol so each stock always lands in its own partition. Spark Structured Streaming consumes these messages in 30-second micro-batches and writes to two sinks in the same processing step: raw JSON files land in AWS S3 as an immutable data lake, and structured records land in Snowflake's `STREAMING.STOCK_TICKS` table for real-time querying. The entire pipeline starts with one command.
 
 ## Architecture
 
@@ -15,7 +15,7 @@ Every 60 seconds a Python producer fetches live closing prices for four large-ca
 | Layer | Tool |
 |-------|------|
 | Data Source | Alpha Vantage API |
-| Message Broker | Apache Kafka (4 partitions) |
+| Message Broker | Apache Kafka (5 partitions) |
 | Stream Processing | Spark Structured Streaming |
 | Data Lake | AWS S3 ap-south-1 |
 | Data Warehouse | Snowflake |
@@ -27,7 +27,7 @@ Alpha Vantage API
 ↓
 Python Producer — publishes every 60s, keyed by symbol
 ↓
-Kafka: stock-prices topic (4 partitions — one per stock)
+Kafka: stock-prices topic (5 partitions — one per stock)
 ↓
 Spark Structured Streaming — micro-batch every 30s
 foreachBatch — dual-write in single processing step
@@ -38,7 +38,7 @@ Raw immutable JSON            Queryable structured rows
 
 ## Tracked Stocks
 
-RELIANCE.BSE · TCS.BSE · HDFCBANK.BSE · INFY.BSE
+RELIANCE.BSE · TCS.BSE · HDFCBANK.BSE · INFY.BSE · WIPRO.BSE 
 
 ## Project Structure
 ```
@@ -101,16 +101,17 @@ After every successful batch, Spark writes the Kafka offset to a checkpoint dire
 S3 stores raw immutable JSON — the source of truth that can be reprocessed at any time without re-hitting the API. Snowflake stores structured, queryable rows for analytics. This separation follows the data lakehouse architecture used by fintech DE teams at companies like Razorpay, CRED, and Groww.
 
 **Production-grade Docker Compose startup ordering**
-The compose file defines 5 services with strict dependency ordering. Zookeeper exposes a health check (nc port 2181); Kafka waits on it and exposes its own health check (nc port 9092). An `init-kafka` service then runs once to pre-create the `stock-prices` topic with 4 explicit partitions (`KAFKA_AUTO_CREATE_TOPICS_ENABLE: false`) and exits. The producer and spark-consumer only start after `init-kafka` completes successfully. Kafka uses dual listeners: `PLAINTEXT://kafka:9092` for internal Docker communication and `PLAINTEXT_HOST://localhost:29092` for external access. Spark checkpoints are persisted in a named Docker volume so they survive container restarts without polluting the project directory.
+The compose file defines 5 services with strict dependency ordering. Zookeeper exposes a health check (nc port 2181); Kafka waits on it and exposes its own health check (nc port 9092). An `init-kafka` service then runs once to pre-create the `stock-prices` topic with 5 explicit partitions (`KAFKA_AUTO_CREATE_TOPICS_ENABLE: false`) and exits. The producer and spark-consumer only start after `init-kafka` completes successfully. Kafka uses dual listeners: `PLAINTEXT://kafka:9092` for internal Docker communication and `PLAINTEXT_HOST://localhost:29092` for external access. Spark checkpoints are persisted in a named Docker volume so they survive container restarts without polluting the project directory.
 
 **Rate-limit aware producer**
-Alpha Vantage's free tier allows 5 API calls per minute. The producer waits 13 seconds between each of the 4 stocks — completing one full cycle in ~52 seconds, safely under the limit. In production this would be replaced with a websocket feed or premium API tier for true real-time tick data.
+Alpha Vantage's free tier allows 5 API calls per minute. The producer waits 13 seconds between each of the 5 stocks — completing one full cycle in ~65 seconds, safely under the limit. In production this would be replaced with a websocket feed or premium API tier for true real-time tick data.
 
 ## Known Issues / Gaps
 
 **Resolved since initial commit**
+- KAFKA_BROKER hardcoded to localhost — now reads from environment variable for correct Docker networking
 - Kafka listener misconfiguration — now uses dual listeners (internal `kafka:9092` + external `localhost:29092`)
-- Topic partition mismatch — topic is now explicitly pre-created with 4 partitions via `init-kafka`
+- Topic partition mismatch — topic is now explicitly pre-created with 5 partitions via `init-kafka`
 - Stale checkpoints on restart — `docker compose down -v` clears the named volume cleanly
 
 **Remaining**
