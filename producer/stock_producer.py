@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Kafka configuration
-KAFKA_BROKER = 'localhost:9092'
+KAFKA_BROKER = os.getenv('KAFKA_BROKER', 'localhost:9092')
 TOPIC = 'stock-prices'
 
 # Stock and their partition assignments
@@ -18,6 +18,7 @@ STOCKS = {
     'TCS.BSE': 1,
     'HDFCBANK.BSE': 2,
     'INFY.BSE': 3,
+    'WIPRO.BSE': 4,
 }
 
 ALPHA_VANTAGE_KEY = os.getenv('ALPHA_VANTAGE_KEY')
@@ -38,7 +39,7 @@ def fetch_stock_price(symbol: str) -> dict | None:
         quote = data.get('Global Quote', {})
 
         if not quote or not quote.get('05. price'):
-            print(f"⚠️  No data for {symbol}")
+            print(f"No data for {symbol}")
             return None
         
         return {
@@ -52,7 +53,7 @@ def fetch_stock_price(symbol: str) -> dict | None:
         }
     
     except Exception as e:
-        print(f"❌ Error fetching {symbol}: {e}")
+        print(f"Error fetching {symbol}: {e}")
         return None
     
 
@@ -66,16 +67,16 @@ def create_producer() -> KafkaProducer:
 
 def run_producer():
     """Main producer loop - fetch and publish every 60 seconds."""
-    print("🚀 Starting stock price producer...")
-    print(f"📡 Connected to Kafka: {KAFKA_BROKER}")
-    print(f"📌 Topic: {TOPIC}")
-    print(f"📊 Tracking: {', '.join(STOCKS.keys())}")
+    print("Starting stock price producer...")
+    print(f"Connected to Kafka: {KAFKA_BROKER}")
+    print(f"Topic: {TOPIC}")
+    print(f"Tracking: {', '.join(STOCKS.keys())}")
     print("=" * 50)
 
     producer = create_producer()
 
     while True:
-        print(f"\n⏰ {datetime.now(UTC).strftime('%H:%M:%S')} — fetching prices...")
+        print(f"\n {datetime.now(UTC).strftime('%H:%M:%S')} — fetching prices...")
 
         for symbol, partition in STOCKS.items():
             record = fetch_stock_price(symbol)
@@ -88,12 +89,12 @@ def run_producer():
                     value=record,
                     partition=partition,
                 )
-                print(f"✅ {record['symbol']}: ₹{record['price']} → partition {partition}")
+                print(f"{record['symbol']}: ₹{record['price']} → partition {partition}")
 
             time.sleep(13) # Rate limit: 5 calls/min on free tier
 
         producer.flush() # ensure all messages are sent
-        print(f"\n💤 Sleeping 60s before next fetch...")
+        print(f"\n Sleeping 60s before next fetch...")
         time.sleep(60)
 
 

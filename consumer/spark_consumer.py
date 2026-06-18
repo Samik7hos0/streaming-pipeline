@@ -79,20 +79,20 @@ def write_batch(batch_df: DataFrame, batch_id: int):
     Writes to both S3 and Snowflake.
     """
     if batch_df.isEmpty():
-        print(f"⏭️  Batch {batch_id} — empty, skipping")
+        print(f"⏭Batch {batch_id} — empty, skipping")
         return
 
     count = batch_df.count()
-    print(f"\n📦 Batch {batch_id} — {count} records")
+    print(f"\n Batch {batch_id} — {count} records")
 
     # Write to S3
     try:
         batch_df.write \
             .mode('append') \
             .json(S3_OUTPUT)
-        print(f"✅ S3 — wrote {count} records")
+        print(f"S3 — wrote {count} records")
     except Exception as e:
-        print(f"❌ S3 write failed: {e}")
+        print(f"S3 write failed: {e}")
 
     # Write to Snowflake
     try:
@@ -102,14 +102,14 @@ def write_batch(batch_df: DataFrame, batch_id: int):
             .option('dbtable', 'STOCK_TICKS') \
             .mode('append') \
             .save()
-        print(f"✅ Snowflake — wrote {count} records to STREAMING.STOCK_TICKS")
+        print(f"Snowflake — wrote {count} records to STREAMING.STOCK_TICKS")
     except Exception as e:
-        print(f"❌ Snowflake write failed: {e}")
+        print(f"Snowflake write failed: {e}")
 
 
 def run_consumer():
     """Main streaming consumer."""
-    print("🚀 Starting Spark Structured Streaming consumer...")
+    print("Starting Spark Structured Streaming consumer...")
 
     os.makedirs('C:/tmp/spark-checkpoints', exist_ok=True)
 
@@ -156,11 +156,11 @@ def run_consumer():
         .start()
     )
 
-    print(f"📡 Reading from Kafka topic: {TOPIC}")
-    print(f"☁️  Writing to S3: {S3_OUTPUT}")
-    print(f"❄️  Writing to Snowflake: STREAMING.STOCK_TICKS")
-    print(f"📌 Checkpoint: {LOCAL_CHECKPOINT}")
-    print("💫 Processing every 30 seconds...\n")
+    print(f"Reading from Kafka topic: {TOPIC}")
+    print(f"Writing to S3: {S3_OUTPUT}")
+    print(f"Writing to Snowflake: STREAMING.STOCK_TICKS")
+    print(f"Checkpoint: {LOCAL_CHECKPOINT}")
+    print("Processing every 30 seconds...\n")
 
     query.awaitTermination()
 

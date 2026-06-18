@@ -1,0 +1,308 @@
+================================================================================
+PROJECT STATE DOCUMENT — Real-Time Market Streaming Pipeline
+Generated: 2026-06-07
+Repository: https://github.com/Samik7hos0/streaming-pipeline
+Author: Samik (samik.r.gt@gmail.com | GitHub: Samik7hos0)
+================================================================================
+
+--------------------------------------------------------------------------------
+1. PROJECT SUMMARY
+--------------------------------------------------------------------------------
+
+A production-grade real-time streaming data pipeline that ingests live BSE
+(Bombay Stock Exchange) stock prices via the Alpha Vantage API, streams them
+through Apache Kafka, processes them with PySpark Structured Streaming, and
+writes to two simultaneous sinks: AWS S3 (data lake) and Snowflake (data
+warehouse). The full stack is containerized with Docker Compose.
+
+This is Part 2 of a two-project data engineering portfolio. Part 1 (batch ELT)
+lives at: https://github.com/Samik7hos0/market-pipeline — same BSE domain,
+daily schedule, dbt transformations, Airflow orchestration.
+
+--------------------------------------------------------------------------------
+2. TECH STACK
+--------------------------------------------------------------------------------
+
+Layer               | Technology
+--------------------|------------------------------------------------------
+Data Source         | Alpha Vantage REST API (GLOBAL_QUOTE endpoint)
+Message Broker      | Apache Kafka 7.4.0 (Confluent Platform image)
+Coordination        | Apache Zookeeper 7.4.0
+Stream Processing   | Apache Spark 4.1.2 (PySpark, Structured Streaming)
+Data Lake           | AWS S3 (ap-south-1 region)
+Data Warehouse      | Snowflake (STREAMING.STOCK_TICKS table)
+Containerization    | Docker Compose (4 services)
+Language            | Python 3.11
+Java Runtime        | OpenJDK 17 (required for Spark inside consumer container)
+
+--------------------------------------------------------------------------------
+3. TRACKED STOCKS
+--------------------------------------------------------------------------------
+
+  Symbol          | Kafka Partition
+  ----------------|----------------
+  RELIANCE.BSE    | 0
+  TCS.BSE         | 1
+  HDFCBANK.BSE    | 2
+  INFY.BSE        | 3
+
+Note: README mentions WIPRO.BSE as 5th stock but the producer code only tracks
+4 stocks (no WIPRO in STOCKS dict). This is a minor inconsistency.
+
+--------------------------------------------------------------------------------
+4. DATA FLOW
+--------------------------------------------------------------------------------
+
+Alpha Vantage API (REST, GLOBAL_QUOTE)
+  ↓  (every 60s, 13s sleep between each stock to respect 5 calls/min rate limit)
+Python Producer (producer/stock_producer.py)
+  ↓  (JSON messages, keyed by stock symbol → deterministic partition routing)
+Kafka Topic: "stock-prices" (4 partitions, 1 per stock)
+  ↓  (micro-batch every 30 seconds)
+Spark Structured Streaming Consumer (consumer/spark_consumer.py)
+  ↓  foreachBatch — dual-write in single processing step
+  ↓                                 ↓
+AWS S3                         Snowflake
+s3a://<bucket>/                STREAMING.STOCK_TICKS
+  streaming/stock_prices/      (append mode, structured rows)
+  (raw immutable JSON)
+
+--------------------------------------------------------------------------------
+5. KAFKA MESSAGE SCHEMA
+--------------------------------------------------------------------------------
+
+Field            | Type    | Description
+-----------------|---------|-----------------------------------------------
+symbol           | string  | Stock ticker without exchange suffix (e.g. "TCS")
+price            | float   | Latest closing/quote price in INR
+change_percent   | string  | % change (e.g. "1.23") — string, no % sign
+volume           | int     | Trading volume for the day
+trading_day      | string  | ISO date of latest trading day
+timestamp        | string  | ISO 8601 UTC timestamp of when message was produced
+
+Spark additionally adds on consumption:
+  partition       | int     | Kafka partition number
+  offset          | long    | Kafka message offset
+  kafka_timestamp | timestamp | Kafka broker ingestion timestamp
+  processed_at    | timestamp | Spark processing time (current_timestamp())
+
+--------------------------------------------------------------------------------
+6. SNOWFLAKE TARGET
+--------------------------------------------------------------------------------
+
+Database  : (configured via env var SNOWFLAKE_DATABASE — likely "DE_GRIND")
+Schema    : STREAMING
+Table     : STOCK_TICKS
+Mode      : append
+
+Verification query (from README):
+  SELECT SYMBOL, COUNT(*) AS RECORDS,
+         MIN(TRADING_DAY) AS FIRST_SEEN,
+         MAX(PROCESSED_AT) AS LAST_PROCESSED
+  FROM DE_GRIND.STREAMING.STOCK_TICKS
+  GROUP BY SYMBOL
+  ORDER BY SYMBOL;
+
+--------------------------------------------------------------------------------
+7. PROJECT FILE STRUCTURE
+--------------------------------------------------------------------------------
+
+streaming-pipeline/
+├── producer/
+│   └── stock_producer.py          # Kafka producer — API polling loop
+├── consumer/
+│   └── spark_consumer.py          # PySpark consumer — dual S3 + Snowflake sink
+├── utils/
+│   └── snowflake_writer.py        # Empty file (1 line) — placeholder, unused
+├── kafka/
+│   └── docker-compose.yaml        # Standalone Kafka + Zookeeper only
+├── dockerfile.producer            # Python 3.11-slim, no JDK
+├── dockerfile.consumer            # Python 3.11-slim + OpenJDK 17
+├── requirements.txt               # Python dependencies
+├── .env.example                   # Credential template
+├── .env                           # Actual credentials (gitignored)
+├── .gitignore                     # Standard Python gitignore
+├── README.md                      # Full project documentation
+├── Real-Time_Market_Streaming_Pipeline_Architecture.png  # Architecture diagram
+└── .claude/
+    └── settings.local.json        # Claude Code local settings
+
+Note: There is both a kafka/docker-compose.yaml (Kafka only) AND a root-level
+docker-compose.yaml implied by the README and Dockerfiles. The root-level
+docker-compose.yaml defines all 4 services (zookeeper, kafka, producer,
+spark-consumer). The kafka/ subfolder version appears to be the standalone
+Kafka-only version for local dev without Docker for the app code.
+
+--------------------------------------------------------------------------------
+8. DOCKER SERVICES (root docker-compose.yaml)
+--------------------------------------------------------------------------------
+
+Service         | Image/Build              | Ports   | Notes
+----------------|--------------------------|---------|------------------------
+zookeeper       | confluentinc/cp-zookeeper:7.4.0 | 2181 | Kafka coordination
+kafka           | confluentinc/cp-kafka:7.4.0     | 9092 | 1 broker, single RF
+producer        | build: dockerfile.producer      | -    | restart: unless-stopped
+spark-consumer  | build: dockerfile.consumer      | -    | restart: unless-stopped
+
+Internal Kafka broker address: kafka:9092 (Docker network)
+External Kafka broker address: localhost:9092
+
+--------------------------------------------------------------------------------
+9. PYTHON DEPENDENCIES (requirements.txt)
+--------------------------------------------------------------------------------
+
+kafka-python-ng==2.2.3     # Kafka producer client
+pyspark==4.1.2             # Spark Structured Streaming
+python-dotenv==1.0.0       # .env file loading
+requests==2.31.0           # Alpha Vantage HTTP calls
+boto3==1.43.19             # AWS SDK (available but not directly used in code —
+                           # Spark's hadoop-aws handles S3 writes natively)
+
+Spark JAR packages (auto-downloaded at runtime via spark.jars.packages):
+  org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.2
+  org.apache.hadoop:hadoop-aws:3.4.1
+  com.amazonaws:aws-java-sdk-bundle:1.12.262
+  net.snowflake:spark-snowflake_2.13:3.0.0
+  net.snowflake:snowflake-jdbc:3.16.1
+
+--------------------------------------------------------------------------------
+10. ENVIRONMENT VARIABLES REQUIRED
+--------------------------------------------------------------------------------
+
+Variable                 | Used By           | Description
+-------------------------|-------------------|--------------------------------
+ALPHA_VANTAGE_KEY        | producer          | API key for stock data
+AWS_ACCESS_KEY_ID        | consumer          | S3 write access
+AWS_SECRET_ACCESS_KEY    | consumer          | S3 write access
+AWS_REGION               | consumer          | e.g. ap-south-1
+S3_BUCKET                | consumer          | Bucket name (no s3:// prefix)
+SNOWFLAKE_ACCOUNT        | consumer          | Account identifier
+SNOWFLAKE_USER           | consumer          | Snowflake username
+SNOWFLAKE_PASSWORD       | consumer          | Snowflake password
+SNOWFLAKE_DATABASE       | consumer          | Target database
+SNOWFLAKE_WAREHOUSE      | consumer          | Compute warehouse
+SNOWFLAKE_ROLE           | consumer          | Snowflake role
+KAFKA_BROKER             | both              | Default: localhost:9092
+SPARK_CHECKPOINT         | consumer          | Default: C:/tmp/spark-checkpoints/stock-stream
+
+--------------------------------------------------------------------------------
+11. KEY ENGINEERING DECISIONS
+--------------------------------------------------------------------------------
+
+1. KAFKA PARTITIONING BY SYMBOL KEY
+   Symbol used as Kafka message key → hash → deterministic partition assignment.
+   Preserves per-symbol time-series ordering for downstream consumers.
+
+2. foreachBatch DUAL-SINK PATTERN
+   Single Spark query writes to S3 and Snowflake in the same micro-batch call.
+   Each sink wrapped in independent try/except — partial failure is tolerated.
+   Avoids double Kafka reads or double checkpoints.
+
+3. EXACTLY-ONCE SEMANTICS VIA CHECKPOINTING
+   Spark writes Kafka offsets to checkpoint directory after each successful batch.
+   On restart, resumes from last committed offset. No data loss, no duplicates.
+   Checkpoint path: configurable via SPARK_CHECKPOINT env var.
+
+4. DUAL-SINK DATA LAKEHOUSE PATTERN
+   S3: raw immutable JSON — source of truth, reprocessable at any time.
+   Snowflake: structured queryable rows for analytics.
+   Follows lakehouse pattern used in production fintech (Razorpay, CRED, Groww).
+
+5. RATE-LIMIT-AWARE PRODUCER
+   Alpha Vantage free tier: 5 calls/min.
+   Producer sleeps 13s between each of 4 stocks → full cycle ~52s + 60s sleep.
+   Production upgrade path: websocket feed or premium API tier.
+
+--------------------------------------------------------------------------------
+12. GIT HISTORY (as of 2026-06-07)
+--------------------------------------------------------------------------------
+
+0b1d7cc  docs: fix all markdown formatting, enhance README with annotated data flow
+c909c22  docs: add architecture diagram PNG
+b50035f  docs: enhanced README — production-grade streaming pipeline documentation
+33419a1  feat: add Docker Compose, Dockerfiles for producer and consumer
+6834c56  feat: Kafka producer + Spark Structured Streaming consumer — dual sink S3 + Snowflake
+4cbfe2a  Initial commit
+
+Branch: main
+Remote: origin (GitHub — Samik7hos0/streaming-pipeline)
+
+--------------------------------------------------------------------------------
+13. CURRENT GIT STATUS (uncommitted changes as of 2026-06-07)
+--------------------------------------------------------------------------------
+
+Modified (unstaged):
+  README.md                                           — edits pending commit
+  producer/stock_producer.py                         — edits pending commit
+
+Deleted (unstaged):
+  "Real-Time Market Streaming Pipeline Architecture.png"   — file deleted/renamed
+  (renamed to: Real-Time_Market_Streaming_Pipeline_Architecture.png — underscores)
+
+--------------------------------------------------------------------------------
+14. KNOWN ISSUES / GAPS
+--------------------------------------------------------------------------------
+
+1. utils/snowflake_writer.py is empty — only 1 line, placeholder, not used.
+   The Snowflake write logic is inline in spark_consumer.py's write_batch().
+
+2. README says 5 stocks (including WIPRO.BSE) but producer code only tracks 4.
+   WIPRO.BSE is missing from the STOCKS dict in stock_producer.py.
+
+3. KAFKA_ADVERTISED_LISTENERS in docker-compose uses PLAINTEXT://localhost:9092
+   but the producer container connects via kafka:9092 (Docker internal network).
+   This can cause connection issues when producer runs inside Docker — the
+   advertised listener should be PLAINTEXT://kafka:9092 for internal networking.
+
+4. Spark checkpoint path is hardcoded as Windows path fallback
+   (C:/tmp/spark-checkpoints/stock-stream). The Docker consumer container
+   overrides this via the SPARK_CHECKPOINT env var to /tmp/spark-checkpoints/
+   stock-stream, which is correct for Linux containers.
+
+5. No tests exist (unit or integration).
+
+6. No monitoring or alerting configured.
+
+--------------------------------------------------------------------------------
+15. HOW TO RUN
+--------------------------------------------------------------------------------
+
+Prerequisites: Docker Desktop, credentials in .env (copy from .env.example)
+
+Full pipeline (one command):
+  docker compose up
+
+Kafka only (for local dev):
+  cd kafka && docker compose up
+
+Verify data in Snowflake:
+  SELECT SYMBOL, COUNT(*) AS RECORDS,
+         MIN(TRADING_DAY) AS FIRST_SEEN,
+         MAX(PROCESSED_AT) AS LAST_PROCESSED
+  FROM DE_GRIND.STREAMING.STOCK_TICKS
+  GROUP BY SYMBOL ORDER BY SYMBOL;
+
+--------------------------------------------------------------------------------
+16. PORTFOLIO CONTEXT
+--------------------------------------------------------------------------------
+
+This project is Part 2 of a two-part DE portfolio targeting Indian fintech/DE roles.
+
+Part 1 (Batch ELT):   https://github.com/Samik7hos0/market-pipeline
+  - Same BSE stocks domain
+  - Daily schedule via Apache Airflow
+  - dbt transformations
+  - Batch paradigm
+
+Part 2 (Streaming):   https://github.com/Samik7hos0/streaming-pipeline
+  - Same BSE stocks domain
+  - Real-time via Kafka + Spark Structured Streaming
+  - Streaming paradigm
+  - This project
+
+Together they demonstrate both paradigms of modern data engineering on the
+same data domain.
+
+================================================================================
+END OF PROJECT STATE DOCUMENT
+================================================================================
