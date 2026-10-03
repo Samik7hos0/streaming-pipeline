@@ -46,8 +46,6 @@ Java Runtime        | OpenJDK 17 (required for Spark inside consumer container)
   HDFCBANK.BSE    | 2
   INFY.BSE        | 3
 
-Note: README mentions WIPRO.BSE as 5th stock but the producer code only tracks
-4 stocks (no WIPRO in STOCKS dict). This is a minor inconsistency.
 
 --------------------------------------------------------------------------------
 4. DATA FLOW
@@ -246,8 +244,8 @@ Deleted (unstaged):
 1. utils/snowflake_writer.py is empty — only 1 line, placeholder, not used.
    The Snowflake write logic is inline in spark_consumer.py's write_batch().
 
-2. README says 5 stocks (including WIPRO.BSE) but producer code only tracks 4.
-   WIPRO.BSE is missing from the STOCKS dict in stock_producer.py.
+2. Resolved: the pipeline tracks 4 stocks; README, producer and topic
+   (4 partitions) now agree.
 
 3. KAFKA_ADVERTISED_LISTENERS in docker-compose uses PLAINTEXT://localhost:9092
    but the producer container connects via kafka:9092 (Docker internal network).

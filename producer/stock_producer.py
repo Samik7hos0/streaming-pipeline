@@ -18,7 +18,6 @@ STOCKS = {
     'TCS.BSE': 1,
     'HDFCBANK.BSE': 2,
     'INFY.BSE': 3,
-    'WIPRO.BSE': 4,
 }
 
 ALPHA_VANTAGE_KEY = os.getenv('ALPHA_VANTAGE_KEY')
