@@ -196,9 +196,10 @@ SPARK_CHECKPOINT         | consumer          | Default: C:/tmp/spark-checkpoints
    Each sink wrapped in independent try/except — partial failure is tolerated.
    Avoids double Kafka reads or double checkpoints.
 
-3. EXACTLY-ONCE SEMANTICS VIA CHECKPOINTING
+3. RESTART RECOVERY VIA CHECKPOINTING (AT-LEAST-ONCE)
    Spark writes Kafka offsets to checkpoint directory after each successful batch.
-   On restart, resumes from last committed offset. No data loss, no duplicates.
+   On restart, resumes from last committed offset. No data loss; sinks append
+   without deduplication, so a retried batch can be written twice.
    Checkpoint path: configurable via SPARK_CHECKPOINT env var.
 
 4. DUAL-SINK DATA LAKEHOUSE PATTERN
